@@ -1,0 +1,370 @@
+---
+title: "step_0-Abdul-Hamid Rabiu"
+output:
+  html_document:
+    df_print: paged
+---
+
+## **Global**
+
+This chunk loads the packages, reads the training data and stores the names of the
+numerical and categorical variables in two vectors. Every function further down works
+off these vectors, so a variable only has to be listed once. `listing_id` is left out
+of both vectors because it identifies an advertisement and is not a vehicle
+characteristic.
+
+```{r, include=FALSE}
+set.seed(123)
+
+library(readr)
+library(dplyr)
+library(psych)
+library(tidyverse)
+library(knitr)
+library(ggplot2)
+library(scales)
+
+Data <- read_csv("project_traindata.csv")
+
+NumericVars <- c("price", "model_year", "vehicle_age", "mileage",
+                 "engine_size", "previous_owners", "warranty_months")
+
+CategoricalVars <- c("make", "segment", "transmission", "fuel_type", "province",
+                     "service_history", "accident_history", "seller_type", "colour")
+```
+
+## **Data Checks**
+
+Before looking at any single variable it is worth checking the shape of the data set,
+whether any values are missing and whether each advertisement appears only once.
+Missing values matter because a regression drops any row with a missing value in a
+variable that is in the model, so a variable with many missing entries can quietly
+shrink the sample.
+
+```{r}
+dim(Data)
+
+kable(
+  data.frame(Missing = sapply(Data, function(x) sum(is.na(x)))),
+  caption = "Missing values per variable"
+)
+
+n_distinct(Data$listing_id) == nrow(Data)
+```
+
+## **Helper Functions**
+
+Rather than repeating the same code sixteen times, the functions below take a variable
+name as text and return one piece of output each. `num_table` gives the descriptive
+statistics together with a 95% confidence interval for the mean, `num_hist` shows the
+shape of the distribution, `num_scatter` shows the relationship with `price`, and
+`num_scatter_segment` splits that same relationship by vehicle segment so that a
+difference in slope between segments becomes visible.
+
+```{r, include=FALSE}
+num_table <- function(var) {
+  x <- Data %>% pull(.data[[var]])
+  stats <- describe(x)
+  ci <- t.test(x)$conf.int
+  stats$CI_lower <- ci[1]
+  stats$CI_upper <- ci[2]
+  rownames(stats) <- var
+  kable(round(stats, 2), caption = paste("Descriptive statistics:", var))
+}
+
+num_hist <- function(var, bins = 30) {
+  ggplot(Data, aes(x = .data[[var]])) +
+    geom_histogram(bins = bins, fill = "steelblue", colour = "white") +
+    scale_x_continuous(labels = comma) +
+    labs(title = paste("Distribution of", var), x = var, y = "Count") +
+    theme_minimal()
+}
+
+num_scatter <- function(var) {
+  ggplot(Data, aes(x = .data[[var]], y = price)) +
+    geom_point(alpha = 0.3) +
+    geom_smooth(method = "loess", se = FALSE, colour = "red") +
+    scale_x_continuous(labels = comma) +
+    scale_y_continuous(labels = comma) +
+    labs(title = paste("price vs", var), x = var, y = "price") +
+    theme_minimal()
+}
+
+num_scatter_segment <- function(var) {
+  ggplot(Data, aes(x = .data[[var]], y = price, colour = segment)) +
+    geom_point(alpha = 0.3) +
+    geom_smooth(method = "lm", se = FALSE) +
+    scale_x_continuous(labels = comma) +
+    scale_y_continuous(labels = comma) +
+    labs(title = paste("price vs", var, "by segment"), x = var, y = "price") +
+    theme_minimal()
+}
+```
+
+The categorical functions follow the same idea. `cat_table` gives absolute and relative
+frequencies, `cat_price_table` gives the price summary within each category,
+`cat_bar` shows how many observations fall in each category, and `cat_box` shows how
+the price distribution differs between categories.
+
+```{r, include=FALSE}
+cat_table <- function(var) {
+  Data %>%
+    count(.data[[var]]) %>%
+    mutate(Percent = round(n / sum(n) * 100, 1)) %>%
+    rename(Category = 1, Frequency = n) %>%
+    kable(caption = paste("Frequencies:", var))
+}
+
+cat_price_table <- function(var) {
+  Data %>%
+    group_by(.data[[var]]) %>%
+    summarise(
+      number_of_vehicles = n(),
+      Average_price = round(mean(price), 0),
+      Median_price = round(median(price), 0),
+      spread_in_group = round(sd(price), 0),
+      Min_price = min(price),
+      Max_price = max(price)
+    ) %>%
+    rename(Category = 1) %>%
+    kable(caption = paste("price by", var))
+}
+
+cat_bar <- function(var) {
+  ggplot(Data, aes(x = fct_infreq(as.factor(.data[[var]])))) +
+    geom_bar(fill = "steelblue") +
+    labs(title = paste("Number of vehicles per", var), x = var, y = "Count") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+cat_box <- function(var) {
+  ggplot(Data, aes(x = as.factor(.data[[var]]), y = price)) +
+    geom_boxplot(fill = "steelblue", alpha = 0.6) +
+    scale_y_continuous(labels = comma) +
+    labs(title = paste("price by", var), x = var, y = "price") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+```
+
+## **Numerical Variables**
+
+Each variable below gets the same three outputs: a table of descriptive statistics, a
+histogram and a scatterplot against `price`. Read them together and ask whether the
+distribution is symmetric or skewed, whether there are impossible or extreme values,
+whether the relationship with price rises or falls, and whether the loess curve is close
+to a straight line or clearly bends. A bend is the signal that a squared term or a
+transformation may be worth trying later.
+
+#### 1.price
+
+`price` is the response, so its shape decides whether the model should be fitted on
+`price` or on a transformation such as `log(price)`. The second plot repeats the
+histogram on the log scale for comparison.
+
+```{r}
+num_table("price")
+num_hist("price")
+
+ggplot(Data, aes(x = log(price))) +
+  geom_histogram(bins = 30, fill = "darkorange", colour = "white") +
+  labs(title = "Distribution of log(price)", x = "log(price)", y = "Count") +
+  theme_minimal()
+```
+
+#### 2.model_year
+
+```{r}
+num_table("model_year")
+num_hist("model_year", bins = 20)
+num_scatter("model_year")
+```
+
+#### 3.vehicle_age
+
+```{r}
+num_table("vehicle_age")
+num_hist("vehicle_age", bins = 20)
+num_scatter("vehicle_age")
+num_scatter_segment("vehicle_age")
+```
+
+#### 4.mileage
+
+```{r}
+num_table("mileage")
+num_hist("mileage")
+num_scatter("mileage")
+num_scatter_segment("mileage")
+```
+
+#### 5.engine_size
+
+```{r}
+num_table("engine_size")
+num_hist("engine_size", bins = 26)
+num_scatter("engine_size")
+num_scatter_segment("engine_size")
+```
+
+#### 6.previous_owners
+
+`previous_owners` is a count that only takes a few whole-number values, so a bar chart
+and a boxplot of price per number of owners are easier to read than a histogram. This
+also shows whether it behaves more naturally as a numeric variable or as a factor.
+
+```{r}
+num_table("previous_owners")
+cat_bar("previous_owners")
+cat_box("previous_owners")
+```
+
+#### 7.warranty_months
+
+Count how many vehicles have no warranty left before reading the histogram, because a
+large block of zeros changes how the rest of the distribution should be interpreted and
+may suggest an indicator variable for "has warranty" alongside the number of months.
+
+```{r}
+num_table("warranty_months")
+sum(Data$warranty_months == 0)
+num_hist("warranty_months", bins = 30)
+num_scatter("warranty_months")
+```
+
+## **Relationship between model_year and vehicle_age**
+
+These two variables are built from the same information, so including both can create
+multicollinearity. The correlation and the scatterplot show how closely they track each
+other, and the last line checks whether the two always add up to the same reference year.
+
+```{r}
+cor(Data$model_year, Data$vehicle_age)
+
+ggplot(Data, aes(x = model_year, y = vehicle_age)) +
+  geom_point(alpha = 0.4) +
+  labs(title = "vehicle_age vs model_year", x = "model_year", y = "vehicle_age") +
+  theme_minimal()
+
+table(Data$model_year + Data$vehicle_age)
+```
+
+## **Correlation Between Numerical Variables**
+
+A correlation matrix gives a quick overview of which numerical predictors move with
+`price` and which move with each other. Strong correlation between two predictors is a
+warning for multicollinearity later on.
+
+```{r}
+Data %>%
+  select(all_of(NumericVars)) %>%
+  cor() %>%
+  round(2) %>%
+  kable(caption = "Correlation matrix of numerical variables")
+```
+
+## **Categorical Variables**
+
+Each variable below gets a frequency table, a price summary per category, a bar chart
+and a boxplot. Look at whether any category has very few observations, since small
+categories give unstable estimates and are candidates for being grouped into an "Other"
+level. Then compare the boxplots: if the price distributions sit at clearly different
+levels, the variable is likely to help predict price.
+
+#### 1.make
+
+```{r}
+cat_table("make")
+cat_price_table("make")
+cat_bar("make")
+cat_box("make")
+```
+
+#### 2.segment
+
+```{r}
+cat_table("segment")
+cat_price_table("segment")
+cat_bar("segment")
+cat_box("segment")
+```
+
+#### 3.transmission
+
+```{r}
+cat_table("transmission")
+cat_price_table("transmission")
+cat_box("transmission")
+```
+
+#### 4.fuel_type
+
+```{r}
+cat_table("fuel_type")
+cat_price_table("fuel_type")
+cat_bar("fuel_type")
+cat_box("fuel_type")
+```
+
+#### 5.province
+
+```{r}
+cat_table("province")
+cat_price_table("province")
+cat_bar("province")
+cat_box("province")
+```
+
+#### 6.service_history
+
+```{r}
+cat_table("service_history")
+cat_price_table("service_history")
+cat_bar("service_history")
+cat_box("service_history")
+```
+
+#### 7.accident_history
+
+```{r}
+cat_table("accident_history")
+cat_price_table("accident_history")
+cat_box("accident_history")
+```
+
+#### 8.seller_type
+
+```{r}
+cat_table("seller_type")
+cat_price_table("seller_type")
+cat_box("seller_type")
+```
+
+#### 9.colour
+
+```{r}
+cat_table("colour")
+cat_price_table("colour")
+cat_bar("colour")
+cat_box("colour")
+```
+
+## **Categorical Variables Within Segment**
+
+The project notes that the effect of a predictor may differ between vehicle segments.
+Splitting a boxplot by segment shows whether the gap between categories is roughly the
+same in every segment or whether it changes, which is what an interaction term would
+capture.
+
+```{r}
+cat_box("transmission") + facet_wrap(~ segment)
+cat_box("fuel_type") + facet_wrap(~ segment)
+```
+
+## **Notes For Meeting 2**
+
+Write the three to five sentence conclusion for each variable here, one short paragraph
+per variable, each supported by the table or plot above. Then list three findings from
+the data and one model idea, such as a transformation of the response, a squared term
+for a predictor whose loess curve bends, or an interaction with `segment`.
