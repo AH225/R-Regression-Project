@@ -1,0 +1,44 @@
+---
+title: "test_0-Abdul-Hamdi rabiu"
+output:
+  html_document:
+    df_print: paged
+---
+
+## **Global**
+
+```{r,include=FALSE}
+set.seed(123)
+install.packages("psych", repos = "https://cloud.r-project.org")
+library(readr)
+library(dplyr)
+library(psych)
+library(tidyverse)
+library(knitr)
+Data <- read_csv("project_traindata.csv")
+
+```
+
+## **Numerical Variables**
+
+```{r,include=FALSE}
+
+NumerciVar <- Data %>% select(where(is.numeric))
+
+Numerical_Variable_Analysis <- function(Dataset,variable = NumerciVar) {
+
+  IndVar <- Dataset %>% pull(all_of(variable))
+   print(kable(round(describe(IndVar), 2), caption = variable))
+  print(t.test(IndVar)$conf.int)
+  
+  
+}
+
+```
+
+#### 1.Model_year
+
+```{r}
+Numerical_Variable_Analysis(Dataset = Data, variable = "model_year")
+
+```
