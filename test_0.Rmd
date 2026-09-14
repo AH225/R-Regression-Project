@@ -16,10 +16,14 @@ library(psych)
 library(tidyverse)
 library(knitr)
 Data <- read_csv("project_traindata.csv")
+Price <- Data %>% select(price)
 
 ```
 
 ## **Numerical Variables**
+```{r}
+
+```
 
 ```{r,include=FALSE}
 
@@ -39,6 +43,16 @@ Numerical_Variable_Analysis <- function(Dataset,variable = NumerciVar) {
 #### 1.Model_year
 
 ```{r}
-Numerical_Variable_Analysis(Dataset = Data, variable = "model_year")
+#mean doesnt really make sense in context of years
+modelyear_price <- Data %>% select(price,model_year) %>% group_by(model_year) %>%
+  summarise(
+    Average_price = mean(price),
+    number_of_vehicles = n() ,
+    spread_in_year = sd(price),
+    Min_price = min(price),
+    Max_price = max(price)
+  )
+modelyear_price
+
 
 ```
