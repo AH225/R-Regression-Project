@@ -52,7 +52,7 @@ modelyear_price <- Data %>% select(price,model_year) %>% group_by(model_year) %>
     Min_price = min(price),
     Max_price = max(price)
   )
-modelyear_price
+
 
 
 ```
