@@ -14,6 +14,8 @@ of both vectors because it identifies an advertisement and is not a vehicle
 characteristic.
 
 ```{r, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
 set.seed(123)
 
 library(readr)
@@ -55,10 +57,10 @@ n_distinct(Data$listing_id) == nrow(Data)
 
 Rather than repeating the same code sixteen times, the functions below take a variable
 name as text and return one piece of output each. `num_table` gives the descriptive
-statistics together with a 95% confidence interval for the mean, `num_hist` shows the
-shape of the distribution, `num_scatter` shows the relationship with `price`, and
-`num_scatter_segment` splits that same relationship by vehicle segment so that a
-difference in slope between segments becomes visible.
+statistics together with a 95% confidence interval for the mean and `num_hist` shows the
+shape of the distribution. `level_table` and `level_box` handle the numerical variables
+that only take a few whole-number values, and `seg_lines` draws fitted lines per segment
+without the points so that a difference in gradient between segments is easy to see.
 
 `num_table` is written with base R functions only (`mean`, `sd`, `median`, `quantile`,
 `min`, `max`) so that skewness, spread and the confidence interval for the mean are all
@@ -101,23 +103,33 @@ num_hist <- function(var, bins = 30) {
     theme_minimal()
 }
 
-num_scatter <- function(var) {
-  ggplot(Data, aes(x = .data[[var]], y = price)) +
-    geom_point(alpha = 0.3) +
-    geom_smooth(method = "loess", se = FALSE, colour = "red") +
-    scale_x_continuous(labels = comma) +
-    scale_y_continuous(labels = comma) +
-    labs(title = paste("price vs", var), x = var, y = "price") +
-    theme_minimal()
+level_table <- function(var) {
+  Data %>%
+    group_by(.data[[var]]) %>%
+    summarise(
+      Count = n(),
+      Average_price = round(mean(price), 0)
+    ) %>%
+    rename(Level = 1) %>%
+    kable(caption = paste("Count and average price by", var))
 }
 
-num_scatter_segment <- function(var) {
-  ggplot(Data, aes(x = .data[[var]], y = price, colour = segment)) +
-    geom_point(alpha = 0.3) +
+level_box <- function(var, yvar = "price") {
+  ggplot(Data, aes(x = as.factor(.data[[var]]), y = .data[[yvar]])) +
+    geom_boxplot(fill = "steelblue", alpha = 0.6, outlier.alpha = 0.4) +
+    stat_summary(fun = mean, geom = "point", shape = 18, size = 2.5, colour = "red") +
+    scale_y_continuous(labels = comma) +
+    labs(title = paste(yvar, "by", var), x = var, y = yvar) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+seg_lines <- function(var, data = Data, xlab = var) {
+  ggplot(data, aes(x = .data[[var]], y = price, colour = segment)) +
     geom_smooth(method = "lm", se = FALSE) +
     scale_x_continuous(labels = comma) +
     scale_y_continuous(labels = comma) +
-    labs(title = paste("price vs", var, "by segment"), x = var, y = "price") +
+    labs(title = paste("price vs", xlab, "by segment"), x = xlab, y = "price") +
     theme_minimal()
 }
 ```
@@ -161,7 +173,8 @@ cat_bar <- function(var) {
 
 cat_box <- function(var) {
   ggplot(Data, aes(x = as.factor(.data[[var]]), y = price)) +
-    geom_boxplot(fill = "steelblue", alpha = 0.6) +
+    geom_boxplot(fill = "steelblue", alpha = 0.6, outlier.alpha = 0.4) +
+    stat_summary(fun = mean, geom = "point", shape = 18, size = 2.5, colour = "red") +
     scale_y_continuous(labels = comma) +
     labs(title = paste("price by", var), x = var, y = "price") +
     theme_minimal() +
@@ -197,61 +210,120 @@ ggplot(Data, aes(x = log(price))) +
 #### 2.model_year
 
 ```{r}
-num_table("model_year")
-num_hist("model_year", bins = 20)
-num_scatter("model_year")
+level_table("model_year")
+level_box("model_year")
 ```
 
 #### 3.vehicle_age
 
 ```{r}
-num_table("vehicle_age")
-num_hist("vehicle_age", bins = 20)
-num_scatter("vehicle_age")
-num_scatter_segment("vehicle_age")
+level_table("vehicle_age")
+level_box("vehicle_age")
+seg_lines("vehicle_age")
 ```
 
 #### 4.mileage
 
 ```{r}
-num_table("mileage")
-num_hist("mileage")
-num_scatter("mileage")
-num_scatter_segment("mileage")
+ggplot(Data, aes(x = mileage / 100000)) +
+  geom_histogram(bins = 30, fill = "steelblue", colour = "white") +
+  labs(title = "Distribution of mileage", x = "Mileage (100k)", y = "Count") +
+  theme_minimal()
 ```
+
+Total mileage mixes two things: how old the vehicle is and how hard it was driven.
+Dividing mileage by vehicle age separates them, so the tables and plots below use
+kilometres per year of age rather than raw mileage.
+
+```{r}
+sum(Data$vehicle_age == 0)
+
+mileage_rate <- Data %>%
+  filter(vehicle_age > 0) %>%
+  mutate(
+    km_per_year = mileage / vehicle_age,
+    km_band = cut(
+      km_per_year,
+      breaks = c(0, 10000, 20000, 30000, 40000, Inf),
+      labels = c("0-10k", "10-20k", "20-30k", "30-40k", "40k+"),
+      right = FALSE
+    )
+  )
+
+mileage_rate %>%
+  group_by(km_band) %>%
+  summarise(
+    Count = n(),
+    Average_price = round(mean(price), 0)
+  ) %>%
+  kable(caption = "Count and average price by kilometres per year of age")
+
+ggplot(mileage_rate, aes(x = km_band, y = price)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.6, outlier.alpha = 0.4) +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 2.5, colour = "red") +
+  scale_y_continuous(labels = comma) +
+  labs(title = "price by kilometres per year of age",
+       x = "Kilometres per year of age", y = "price") +
+  theme_minimal()
+
+seg_lines("km_per_year", data = mileage_rate,
+          xlab = "kilometres per year of age")
+```
+
+Note: the top band stands out from the rest. Flagged here, to be looked at before
+Meeting 2.
 
 #### 5.engine_size
 
+Engine size is largely determined by segment, so it's expected to duplicate information
+already captured there — the count table is kept only as a data-quality/rarity check.
+
 ```{r}
-num_table("engine_size")
-num_hist("engine_size", bins = 26)
-num_scatter("engine_size")
-num_scatter_segment("engine_size")
+Data %>%
+  count(engine_size) %>%
+  rename(Count = n) %>%
+  kable(caption = "Count by engine_size")
 ```
 
 #### 6.previous_owners
 
-`previous_owners` is a count that only takes a few whole-number values, so a bar chart
-and a boxplot of price per number of owners are easier to read than a histogram. This
-also shows whether it behaves more naturally as a numeric variable or as a factor.
+`previous_owners` is a count that only takes a few whole-number values, so a table of
+counts and a boxplot of price per number of owners are easier to read than a histogram.
+The second boxplot shows vehicle age against the same levels, since more owners usually
+goes together with an older vehicle.
 
 ```{r}
-num_table("previous_owners")
-cat_bar("previous_owners")
-cat_box("previous_owners")
+level_table("previous_owners")
+level_box("previous_owners")
+level_box("previous_owners", yvar = "vehicle_age")
 ```
 
 #### 7.warranty_months
 
-Count how many vehicles have no warranty left before reading the histogram, because a
-large block of zeros changes how the rest of the distribution should be interpreted and
-may suggest an indicator variable for "has warranty" alongside the number of months.
+Most vehicles have no warranty left, so the summary statistics over all vehicles are not
+informative. The table below splits the data into vehicles with and without a warranty,
+and the average price is only shown for the group that has one.
 
 ```{r}
-num_table("warranty_months")
-sum(Data$warranty_months == 0)
-num_hist("warranty_months", bins = 30)
-num_scatter("warranty_months")
+Data %>%
+  mutate(Warranty = if_else(warranty_months == 0, "No warranty", "Warranty remaining")) %>%
+  group_by(Warranty) %>%
+  summarise(
+    Count = n(),
+    Average_price = round(mean(price), 0)
+  ) %>%
+  mutate(Average_price = if_else(Warranty == "No warranty", NA_real_, Average_price)) %>%
+  kable(caption = "Warranty remaining: zero versus non-zero")
+
+Data %>%
+  filter(warranty_months > 0) %>%
+  ggplot(aes(x = warranty_months, y = price)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", se = FALSE, colour = "red") +
+  scale_y_continuous(labels = comma) +
+  labs(title = "price vs warranty months (vehicles with warranty remaining)",
+       x = "warranty_months", y = "price") +
+  theme_minimal()
 ```
 
 ## **Relationship between model_year and vehicle_age**
@@ -304,11 +376,24 @@ cat_box("make")
 
 #### 2.segment
 
+`segment` also appears inside the `vehicle_age` and mileage sections, where it is used to
+compare gradients between segments. The outputs below are the univariate view: how many
+vehicles fall in each segment and how the price distribution differs between them.
+
+The y-axis is on a log scale. Luxury prices stretch the raw scale and compress the other
+four segments into a narrow band. Plotting luxury separately was considered, but two
+panels with different y-scales would break the direct comparison between segments. The
+log scale keeps all five on one axis and gives early support for a log(price)
+transformation later in the analysis.
+
 ```{r}
 cat_table("segment")
 cat_price_table("segment")
 cat_bar("segment")
-cat_box("segment")
+
+cat_box("segment") +
+  scale_y_log10(labels = comma) +
+  labs(title = "price by segment (log y-axis)", y = "price (log scale)")
 ```
 
 #### 3.transmission
