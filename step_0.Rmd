@@ -18,7 +18,6 @@ set.seed(123)
 
 library(readr)
 library(dplyr)
-library(psych)
 library(tidyverse)
 library(knitr)
 library(ggplot2)
@@ -61,13 +60,35 @@ shape of the distribution, `num_scatter` shows the relationship with `price`, an
 `num_scatter_segment` splits that same relationship by vehicle segment so that a
 difference in slope between segments becomes visible.
 
+`num_table` is written with base R functions only (`mean`, `sd`, `median`, `quantile`,
+`min`, `max`) so that skewness, spread and the confidence interval for the mean are all
+in one table without depending on an extra package.
+
 ```{r, include=FALSE}
+skewness <- function(x) {
+  n <- length(x)
+  m <- mean(x)
+  s <- sd(x)
+  (sum((x - m)^3) / n) / s^3
+}
+
 num_table <- function(var) {
   x <- Data %>% pull(.data[[var]])
-  stats <- describe(x)
   ci <- t.test(x)$conf.int
-  stats$CI_lower <- ci[1]
-  stats$CI_upper <- ci[2]
+
+  stats <- data.frame(
+    n = length(x),
+    mean = mean(x),
+    sd = sd(x),
+    median = median(x),
+    min = min(x),
+    max = max(x),
+    Q1 = quantile(x, 0.25),
+    Q3 = quantile(x, 0.75),
+    skew = skewness(x),
+    CI_lower = ci[1],
+    CI_upper = ci[2]
+  )
   rownames(stats) <- var
   kable(round(stats, 2), caption = paste("Descriptive statistics:", var))
 }
