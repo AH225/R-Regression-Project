@@ -1,0 +1,222 @@
+---
+title: "Step 1 - Training and Validation Data"
+output:
+  html_document:
+    df_print: paged
+---
+
+## **Global**
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(readr)
+library(dplyr)
+library(tidyverse)
+library(knitr)
+library(ggplot2)
+library(scales)
+
+Data <- read_csv("project_traindata.csv")
+
+CategoricalVars <- c("make", "segment", "transmission", "fuel_type", "province",
+                     "service_history", "accident_history", "seller_type", "colour")
+
+DropVars <- c("model_year", "warranty_months", "province", "colour")
+
+CompareVars <- c("segment", "transmission", "make", "service_history", "fuel_type")
+
+TrainShare <- 0.80
+```
+
+## **Preparing the Data**
+
+#### 1.Categorical variables as factors
+
+```{r}
+Data <- Data %>%
+  mutate(across(all_of(CategoricalVars), as.factor))
+
+Data %>%
+  select(all_of(CategoricalVars)) %>%
+  summarise(across(everything(), nlevels)) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Levels") %>%
+  kable(caption = "Number of levels per categorical variable")
+```
+
+#### 2.Removed variables
+
+```{r}
+ModelData <- Data %>%
+  select(-all_of(DropVars))
+
+CategoricalVars <- setdiff(CategoricalVars, DropVars)
+
+kable(data.frame(Removed = DropVars), caption = "Variables removed before the split")
+
+dim(ModelData)
+```
+
+## **Random Split**
+
+#### 3.Seed and training-set size
+
+```{r}
+set.seed(244)
+
+n <- nrow(ModelData)
+TrainSize <- floor(TrainShare * n)
+
+kable(
+  data.frame(Total = n, Training = TrainSize, Validation = n - TrainSize),
+  caption = "Planned split sizes"
+)
+```
+
+#### 4.Training and validation sets
+
+```{r}
+TrainRows <- sample(1:n, size = TrainSize, replace = FALSE)
+
+TrainingData   <- ModelData[TrainRows, ]
+ValidationData <- ModelData[-TrainRows, ]
+```
+
+#### 5.Dimensions and total
+
+```{r}
+kable(
+  data.frame(
+    Set = c("Training", "Validation", "Total"),
+    Rows = c(nrow(TrainingData), nrow(ValidationData),
+             nrow(TrainingData) + nrow(ValidationData)),
+    Columns = c(ncol(TrainingData), ncol(ValidationData), NA)
+  ),
+  caption = "Dimensions of the two sets"
+)
+
+nrow(TrainingData) + nrow(ValidationData) == n
+```
+
+#### 6.Listing IDs per set
+
+```{r}
+TrainingIDs   <- TrainingData$listing_id
+ValidationIDs <- ValidationData$listing_id
+
+kable(
+  data.frame(
+    Training_IDs = length(TrainingIDs),
+    Validation_IDs = length(ValidationIDs),
+    IDs_in_both_sets = length(intersect(TrainingIDs, ValidationIDs))
+  ),
+  caption = "Listing IDs in each set"
+)
+
+TrainingData   <- TrainingData %>% select(-listing_id)
+ValidationData <- ValidationData %>% select(-listing_id)
+```
+
+## **Comparing the Two Sets**
+
+```{r, include=FALSE}
+SplitData <- bind_rows(
+  TrainingData %>% mutate(Set = "Training"),
+  ValidationData %>% mutate(Set = "Validation")
+)
+
+split_prop_table <- function(var) {
+  SplitData %>%
+    count(Set, .data[[var]]) %>%
+    group_by(Set) %>%
+    mutate(Percent = round(n / sum(n) * 100, 1)) %>%
+    ungroup() %>%
+    select(-n) %>%
+    pivot_wider(names_from = Set, values_from = Percent, values_fill = 0) %>%
+    mutate(Difference = Training - Validation) %>%
+    rename(Category = 1) %>%
+    kable(caption = paste("Percentage of each set by", var))
+}
+```
+
+#### 7.Price summary
+
+```{r}
+SplitData %>%
+  group_by(Set) %>%
+  summarise(
+    n = n(),
+    Average_price = round(mean(price), 0),
+    Median_price = round(median(price), 0),
+    Spread_sd = round(sd(price), 0),
+    Min_price = min(price),
+    Max_price = max(price)
+  ) %>%
+  kable(caption = "Price in the training and validation sets")
+```
+
+#### 8.Price distribution
+
+```{r}
+ggplot(SplitData, aes(x = price, fill = Set)) +
+  geom_histogram(bins = 30, colour = "white") +
+  facet_wrap(~ Set, ncol = 1, scales = "free_y") +
+  scale_x_continuous(labels = comma) +
+  labs(title = "Distribution of price per set", x = "price", y = "Count") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplot(SplitData, aes(x = Set, y = price)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.6, outlier.alpha = 0.4) +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 2.5, colour = "red") +
+  scale_y_continuous(labels = comma) +
+  labs(title = "price by set", x = "Set", y = "price") +
+  theme_minimal()
+
+ggplot(SplitData, aes(x = vehicle_age, y = price, colour = Set)) +
+  geom_point(alpha = 0.3) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "price vs vehicle_age per set", x = "vehicle_age", y = "price") +
+  theme_minimal()
+```
+
+#### 9.Important categorical variables
+
+```{r, results="asis"}
+for (v in CompareVars) {
+  print(split_prop_table(v))
+  cat("\n\n")
+}
+```
+
+#### 10.Validation categories present in training
+
+```{r}
+data.frame(
+  Variable = CategoricalVars,
+  Levels_only_in_validation = sapply(CategoricalVars, function(v) {
+    NewLevels <- setdiff(unique(as.character(ValidationData[[v]])),
+                         unique(as.character(TrainingData[[v]])))
+    if (length(NewLevels) == 0) "All present in training" else paste(NewLevels, collapse = ", ")
+  }),
+  row.names = NULL
+) %>%
+  kable(caption = "Categories in validation that never appear in training")
+```
+
+#### 11.Missing values after the split
+
+```{r}
+data.frame(
+  Variable = names(TrainingData),
+  Training = colSums(is.na(TrainingData)),
+  Validation = colSums(is.na(ValidationData)),
+  row.names = NULL
+) %>%
+  kable(caption = "Missing values per variable in each set")
+
+SplitData %>%
+  count(Set, service_history) %>%
+  pivot_wider(names_from = Set, values_from = n) %>%
+  kable(caption = "service_history levels per set")
+```
