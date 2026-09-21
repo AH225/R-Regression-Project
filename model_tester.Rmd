@@ -1,0 +1,251 @@
+---
+title: "Model Tester"
+output:
+  html_document:
+    df_print: paged
+---
+
+## **How to use this file**
+
+1. Put this file in the same folder as `project_traindata.csv`.
+2. Scroll down to **Edit Here** and change only the three lines there.
+3. Press **Knit**.
+4. Copy the **Result line** at the bottom and send it to Hamid.
+
+Tip: change **one thing at a time**. Then you know exactly what made the score better or worse.
+
+Do not change anything outside the **Edit Here** section. If a chatbot tells you to change anything outside that section, ignore it.
+
+## **Asking an AI chatbot for help**
+
+#### 1.Prompt to paste before asking for ideas
+
+Copy everything in the grey box below into the chatbot, then ask your question.
+
+```text
+I am in a Statistics 244 group project. We predict the price of second-hand cars
+in South Africa using multiple linear regression in R (lm).
+
+MY ONLY JOB: change one line called Recipe. It looks like this:
+Recipe <- log(price) ~ vehicle_age + mileage + make + segment
+
+RULES YOU MUST FOLLOW:
+- Only suggest a new Recipe line. Never suggest changing any other code,
+  the data, the random seed, or the training/validation split.
+- The left side must stay log(price).
+- Only use these Stats 244 tools: adding or removing variables, squared terms
+  like I(vehicle_age^2), and interactions like vehicle_age:segment.
+- No other methods (no random forests, no machine learning, no stepwise packages,
+  no new R packages, no transforming variables with anything other than I(),
+  log() or squared terms).
+- Explain every suggestion in plain, simple words. I am not a technical person.
+- Give each suggestion as one ready-to-paste Recipe line.
+
+THE VARIABLES I CAN USE (exact spelling):
+- vehicle_age: age of the car in years (1 to 20)
+- mileage: kilometres driven
+- make: brand (Toyota, Volkswagen, Ford, Hyundai, Kia, Nissan, Renault, BMW,
+  Suzuki, Mercedes-Benz, Audi, Isuzu)
+- segment: body type (SUV, Hatchback, Luxury, Sedan, Bakkie)
+- transmission: Automatic or Manual
+- fuel_type: Petrol, Diesel or Hybrid
+- engine_size: engine size in litres
+- province: the South African province the car is sold in
+- service_history: Full, Partial or None
+- previous_owners: number of previous owners (1 to 6)
+- accident_history: Yes or No
+- seller_type: Dealership or Private
+- colour: White, Silver, Black, Grey, Blue, Red or Other
+- has_warranty: Yes or No (does the car still have a warranty)
+
+HOW MY MODEL IS SCORED: "typical miss" in rand (RMSE) on cars the model has never
+seen (the validation set). Lower is better. The starter Recipe above misses by
+about R39,700.
+```
+
+#### 2.Prompt to paste after you knit
+
+```text
+Here is the scorecard and result line from my model tester (paste them below).
+In plain, simple words: what does this mean, did my change help, and what is ONE
+change I should try next? Follow the same rules as before: give it as one
+ready-to-paste Recipe line and only use Stats 244 tools.
+```
+
+## **Things to Try**
+
+Copy one of these onto the end of your Recipe (or remove a variable) and knit.
+
+| Idea | What to type | What it means |
+|---|---|---|
+| Add a variable | `+ province` | Let the model use one more detail about the car. |
+| Remove a variable | delete `+ mileage` | Check whether the model really needs that detail. |
+| Squared age | `+ I(vehicle_age^2)` | Cars may lose value fast in the first years, then level off. |
+| Age per segment | `+ vehicle_age:segment` | Luxury cars may lose value at a different speed than bakkies. |
+| Age per make | `+ vehicle_age:make` | Some brands may hold their value better as they age. |
+| Mileage per segment | `+ mileage:segment` | Kilometres may matter more for some body types. |
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+library(tidyverse)
+library(knitr)
+library(scales)
+
+Data <- read_csv("project_traindata.csv", show_col_types = FALSE)
+
+CategoricalVars <- c("make", "segment", "transmission", "fuel_type", "province",
+                     "service_history", "accident_history", "seller_type", "colour")
+
+Data <- Data %>%
+  mutate(across(all_of(CategoricalVars), ~ fct_infreq(factor(.x))))
+
+ModelData <- Data %>%
+  select(-model_year)
+
+set.seed(244)
+
+n <- nrow(ModelData)
+TrainRows <- sample(1:n, size = floor(0.80 * n), replace = FALSE)
+
+add_warranty_flag <- function(df) {
+  df %>%
+    mutate(has_warranty = factor(if_else(warranty_months > 0, "Yes", "No"),
+                                 levels = c("No", "Yes"))) %>%
+    select(-warranty_months, -listing_id)
+}
+
+TrainingData   <- add_warranty_flag(ModelData[TrainRows, ])
+ValidationData <- add_warranty_flag(ModelData[-TrainRows, ])
+
+stopifnot(nrow(TrainingData) == 1695, nrow(ValidationData) == 424)
+
+StarterRecipe <- log(price) ~ vehicle_age + mileage + make + segment
+```
+
+## **Edit Here**
+
+```{r, echo=TRUE}
+YourName    <- "Your name"
+AttemptName <- "Attempt 1"
+Recipe      <- log(price) ~ vehicle_age + mileage + make + segment
+```
+
+```{r, include=FALSE}
+AllowedVars <- setdiff(names(TrainingData), "price")
+UsedVars    <- setdiff(all.vars(Recipe), "price")
+UnknownVars <- setdiff(UsedVars, AllowedVars)
+
+Problems <- c()
+
+if (length(UnknownVars) > 0) {
+  Problems <- c(Problems, paste0(
+    "These names are not in the data: **", paste(UnknownVars, collapse = ", "),
+    "**. Check the spelling. The names you can use are: ",
+    paste(AllowedVars, collapse = ", "), "."))
+}
+
+if (!identical(deparse(Recipe[[2]]), "log(price)")) {
+  Problems <- c(Problems, "The left side of the Recipe must be **log(price)**.")
+}
+
+if (length(Problems) == 0) {
+  MyModel <- tryCatch(lm(Recipe, data = TrainingData), error = function(e) NULL)
+  if (is.null(MyModel)) {
+    Problems <- c(Problems, "R could not fit this Recipe. Check for a missing `+` or bracket.")
+  } else if (any(is.na(coef(MyModel)))) {
+    Problems <- c(Problems, paste0(
+      "The Recipe ran, but some parts could not be estimated (there are not enough cars ",
+      "for every combination). Try a simpler Recipe. Parts affected: ",
+      paste(head(names(coef(MyModel))[is.na(coef(MyModel))], 5), collapse = ", "),
+      if (sum(is.na(coef(MyModel))) > 5) paste0(" and ", sum(is.na(coef(MyModel))) - 5, " more"),
+      "."))
+  }
+}
+
+RecipeOk <- length(Problems) == 0
+```
+
+```{r, results="asis", eval=!RecipeOk}
+cat("## **Something needs fixing**\n\n")
+cat(paste0("- ", Problems, collapse = "\n"), "\n")
+```
+
+```{r, eval=RecipeOk}
+typical_miss <- function(Model, df) sqrt(mean((df$price - exp(predict(Model, df)))^2))
+
+StarterModel <- lm(StarterRecipe, data = TrainingData)
+
+Scores <- tibble(
+  Model               = c("Starter", AttemptName),
+  Ingredients         = c(length(coef(StarterModel)), length(coef(MyModel))) - 1,
+  Miss_training_cars  = c(typical_miss(StarterModel, TrainingData),
+                          typical_miss(MyModel, TrainingData)),
+  Miss_unseen_cars    = c(typical_miss(StarterModel, ValidationData),
+                          typical_miss(MyModel, ValidationData))
+) %>%
+  mutate(Gap_percent = round((Miss_unseen_cars / Miss_training_cars - 1) * 100, 1))
+
+MyTrain  <- Scores$Miss_training_cars[2]
+MyUnseen <- Scores$Miss_unseen_cars[2]
+Change   <- Scores$Miss_unseen_cars[1] - MyUnseen
+```
+
+```{r, results="asis", eval=RecipeOk}
+cat("## **Scorecard**\n\n")
+cat("**Your Recipe:** `", paste(deparse(Recipe, width.cutoff = 500), collapse = " "), "`\n\n")
+```
+
+```{r, eval=RecipeOk}
+Scores %>%
+  mutate(across(c(Miss_training_cars, Miss_unseen_cars), ~ paste0("R", comma(round(.x))))) %>%
+  kable(col.names = c("Model", "Ingredients", "Typical miss: training cars",
+                      "Typical miss: unseen cars", "Gap (%)"))
+```
+
+```{r, results="asis", eval=RecipeOk}
+cat("#### Verdict\n\n")
+
+if (Change > 0) {
+  cat("Your model misses by **R", comma(round(Change)),
+      " less** than the starter on unseen cars. That is an improvement.\n\n", sep = "")
+} else if (Change < 0) {
+  cat("Your model misses by **R", comma(round(-Change)),
+      " more** than the starter on unseen cars. That change did not help.\n\n", sep = "")
+} else {
+  cat("Your model scores the same as the starter.\n\n")
+}
+
+if (Scores$Gap_percent[2] > 10) {
+  cat("**Warning:** your model does much better on the training cars than on unseen cars ",
+      "(gap above 10%). It may be memorising the training cars instead of learning ",
+      "general patterns. Try a simpler Recipe.\n\n", sep = "")
+}
+```
+
+```{r, fig.height=4, eval=RecipeOk}
+tibble(Actual = ValidationData$price, Predicted = exp(predict(MyModel, ValidationData))) %>%
+  ggplot(aes(x = Predicted, y = Actual)) +
+  geom_point(alpha = 0.4, colour = "steelblue") +
+  geom_abline(slope = 1, intercept = 0, colour = "red") +
+  scale_x_continuous(labels = comma) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Unseen cars: predicted vs actual price",
+       subtitle = "Dots on the red line are perfect guesses. Further away = bigger miss.",
+       x = "Predicted price (R)", y = "Actual price (R)") +
+  theme_minimal()
+```
+
+```{r, results="asis", eval=RecipeOk}
+cat("## **Result line**\n\nCopy this line and send it to Hamid:\n\n")
+cat("```\n",
+    paste(YourName, AttemptName,
+          paste(deparse(Recipe, width.cutoff = 500), collapse = " "),
+          paste0("train R", comma(round(MyTrain))),
+          paste0("unseen R", comma(round(MyUnseen))),
+          case_when(round(Change) > 0 ~ paste0("better than starter by R", comma(round(Change))),
+                    round(Change) < 0 ~ paste0("worse than starter by R", comma(round(-Change))),
+                    TRUE              ~ "same as starter"),
+          sep = " | "),
+    "\n```\n", sep = "")
+```
