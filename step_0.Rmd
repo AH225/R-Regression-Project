@@ -16,7 +16,7 @@ characteristic.
 ```{r, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 
-set.seed(123)
+set.seed(244)
 
 library(readr)
 library(dplyr)
